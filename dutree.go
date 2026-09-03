@@ -6,7 +6,9 @@ package dutree
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"sync"
 )
 
 // Entry is one node in a scanned directory tree. For a file, Size is its
@@ -34,16 +36,28 @@ type Options struct {
 // Entries the caller can't read (permission errors, or a file removed
 // mid-walk) are skipped rather than aborting the whole scan, since one
 // locked-down directory shouldn't stop the rest of the report.
+//
+// Sibling subdirectories are scanned concurrently, bounded by GOMAXPROCS,
+// so a wide tree on fast storage doesn't sit idle waiting on one directory
+// at a time.
 func Scan(root string, opts Options) (*Entry, error) {
 	info, err := os.Lstat(root)
 	if err != nil {
 		return nil, err
 	}
-	e, _ := scan(root, info, opts, 0)
+	sem := make(chan struct{}, workerLimit())
+	e, _ := scan(root, info, opts, 0, sem)
 	return e, nil
 }
 
-func scan(path string, info os.FileInfo, opts Options, depth int) (*Entry, error) {
+func workerLimit() int {
+	if n := runtime.GOMAXPROCS(0); n > 1 {
+		return n
+	}
+	return 1
+}
+
+func scan(path string, info os.FileInfo, opts Options, depth int, sem chan struct{}) (*Entry, error) {
 	name := info.Name()
 	if opts.SkipHidden && depth > 0 && name[0] == '.' {
 		return nil, nil
@@ -67,13 +81,37 @@ func scan(path string, info os.FileInfo, opts Options, depth int) (*Entry, error
 		return e, nil
 	}
 
-	for _, de := range entries {
+	children := make([]*Entry, len(entries))
+	var wg sync.WaitGroup
+	for i, de := range entries {
 		childInfo, err := de.Info()
 		if err != nil {
 			continue
 		}
-		child, err := scan(filepath.Join(path, de.Name()), childInfo, opts, depth+1)
-		if err != nil || child == nil {
+		childPath := filepath.Join(path, de.Name())
+
+		// Hand the child to a worker if one is free; otherwise scan it
+		// inline. The non-blocking select keeps this from deadlocking
+		// against itself as goroutines recurse and compete for the same
+		// bounded pool of slots.
+		select {
+		case sem <- struct{}{}:
+			wg.Add(1)
+			go func(i int, path string, info os.FileInfo) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				child, _ := scan(path, info, opts, depth+1, sem)
+				children[i] = child
+			}(i, childPath, childInfo)
+		default:
+			child, _ := scan(childPath, childInfo, opts, depth+1, sem)
+			children[i] = child
+		}
+	}
+	wg.Wait()
+
+	for _, child := range children {
+		if child == nil {
 			continue
 		}
 		e.Size += child.Size

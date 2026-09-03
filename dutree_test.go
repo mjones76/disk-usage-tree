@@ -3,6 +3,7 @@ package dutree
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,6 +28,28 @@ func TestScanComputesDirectorySizes(t *testing.T) {
 	// "a.txt" (100 bytes).
 	if e.Children[0].Name != "sub" {
 		t.Fatalf("children[0] = %q, want %q", e.Children[0].Name, "sub")
+	}
+}
+
+func TestScanConcurrentSubdirectories(t *testing.T) {
+	root := t.TempDir()
+	const dirs = 32
+	var want int64
+	for i := 0; i < dirs; i++ {
+		size := 100 + i
+		writeFile(t, filepath.Join(root, fmt.Sprintf("d%d", i), "f.txt"), size)
+		want += int64(size)
+	}
+
+	e, err := Scan(root, Options{})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if e.Size != want {
+		t.Fatalf("root size = %d, want %d", e.Size, want)
+	}
+	if len(e.Children) != dirs {
+		t.Fatalf("children = %d, want %d", len(e.Children), dirs)
 	}
 }
 
