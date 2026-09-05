@@ -87,6 +87,10 @@ show, a script consuming the JSON can compute too.
   are still totaled from the full tree underneath).
 - `Flatten(e *Entry) []*Entry` — the tree as a single slice, for callers
   that want to sort or filter across the whole scan.
+- `Prune(e *Entry, patterns ...string) *Entry` — drop entries whose name
+  matches a `filepath.Match` pattern (e.g. `"node_modules"`, `"*.log"`),
+  along with everything under them, and adjust ancestor sizes to match.
+  Returns a new tree; the one passed in is left untouched.
 - `WriteText` / `WriteJSON` — render a tree in either format.
 - `HumanSize(bytes int64) string` — the `du -h` style formatter used by
   `WriteText`, exported in case you want it for your own output.
@@ -96,5 +100,11 @@ scan; a single locked-down folder shouldn't stop the rest of the report.
 
 ## Status
 
-Early. The core scan and both output formats work and are tested. See the
-roadmap for what's still missing.
+Early. The core scan, both output formats, and pruning by pattern work and
+are tested. See the roadmap for what's still missing.
+
+## Roadmap
+
+- top-N largest entries helper
+- `context.Context` support for cancelling long scans
+- benchmarks for scan performance on large trees
