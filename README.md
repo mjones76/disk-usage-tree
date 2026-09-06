@@ -87,6 +87,8 @@ show, a script consuming the JSON can compute too.
   are still totaled from the full tree underneath).
 - `Flatten(e *Entry) []*Entry` — the tree as a single slice, for callers
   that want to sort or filter across the whole scan.
+- `Largest(e *Entry, n int) []*Entry` — the n biggest files or directories
+  anywhere under the root, largest first. The root itself is excluded.
 - `Prune(e *Entry, patterns ...string) *Entry` — drop entries whose name
   matches a `filepath.Match` pattern (e.g. `"node_modules"`, `"*.log"`),
   along with everything under them, and adjust ancestor sizes to match.
@@ -105,6 +107,5 @@ are tested. See the roadmap for what's still missing.
 
 ## Roadmap
 
-- top-N largest entries helper
 - `context.Context` support for cancelling long scans
 - benchmarks for scan performance on large trees
