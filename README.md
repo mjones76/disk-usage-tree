@@ -82,6 +82,9 @@ show, a script consuming the JSON can compute too.
 
 - `Scan(root string, opts Options) (*Entry, error)` — walk `root` and
   return the sized tree.
+- `ScanContext(ctx context.Context, root string, opts Options) (*Entry, error)`
+  — same as `Scan`, but returns early with `ctx.Err()` if `ctx` is
+  cancelled before the scan finishes.
 - `Options.SkipHidden` — leave out dotfiles and dotdirs.
 - `Options.MaxDepth` — cap how many levels of children come back (sizes
   are still totaled from the full tree underneath).
@@ -102,10 +105,10 @@ scan; a single locked-down folder shouldn't stop the rest of the report.
 
 ## Status
 
-Early. The core scan, both output formats, and pruning by pattern work and
-are tested. See the roadmap for what's still missing.
+Early. The core scan, both output formats, pruning by pattern, and
+cancellation via `ScanContext` work and are tested. See the roadmap for
+what's still missing.
 
 ## Roadmap
 
-- `context.Context` support for cancelling long scans
 - benchmarks for scan performance on large trees

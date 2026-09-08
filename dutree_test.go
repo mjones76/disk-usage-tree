@@ -2,7 +2,9 @@ package dutree
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,6 +52,36 @@ func TestScanConcurrentSubdirectories(t *testing.T) {
 	}
 	if len(e.Children) != dirs {
 		t.Fatalf("children = %d, want %d", len(e.Children), dirs)
+	}
+}
+
+func TestScanContextAlreadyCancelled(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a.txt"), 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	e, err := ScanContext(ctx, root, Options{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if e != nil {
+		t.Fatalf("entry = %v, want nil", e)
+	}
+}
+
+func TestScanContextCancelledMidScan(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 8; i++ {
+		writeFile(t, filepath.Join(root, fmt.Sprintf("d%d", i), "f.txt"), 10)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := ScanContext(ctx, root, Options{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
 

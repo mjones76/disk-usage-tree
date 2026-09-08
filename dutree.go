@@ -4,6 +4,7 @@
 package dutree
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,12 +42,24 @@ type Options struct {
 // so a wide tree on fast storage doesn't sit idle waiting on one directory
 // at a time.
 func Scan(root string, opts Options) (*Entry, error) {
+	return ScanContext(context.Background(), root, opts)
+}
+
+// ScanContext is Scan with a context that can cancel a scan still in
+// progress. A tree walk over a large or slow (network, spun-down disk)
+// filesystem can run long enough that a caller needs a way out; cancelling
+// ctx stops scheduling new work and ScanContext returns ctx.Err() once the
+// in-flight goroutines unwind.
+func ScanContext(ctx context.Context, root string, opts Options) (*Entry, error) {
 	info, err := os.Lstat(root)
 	if err != nil {
 		return nil, err
 	}
 	sem := make(chan struct{}, workerLimit())
-	e, _ := scan(root, info, opts, 0, sem)
+	e, err := scan(ctx, root, info, opts, 0, sem)
+	if err != nil {
+		return nil, err
+	}
 	return e, nil
 }
 
@@ -57,7 +70,11 @@ func workerLimit() int {
 	return 1
 }
 
-func scan(path string, info os.FileInfo, opts Options, depth int, sem chan struct{}) (*Entry, error) {
+func scan(ctx context.Context, path string, info os.FileInfo, opts Options, depth int, sem chan struct{}) (*Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	name := info.Name()
 	if opts.SkipHidden && depth > 0 && name[0] == '.' {
 		return nil, nil
@@ -84,6 +101,10 @@ func scan(path string, info os.FileInfo, opts Options, depth int, sem chan struc
 	children := make([]*Entry, len(entries))
 	var wg sync.WaitGroup
 	for i, de := range entries {
+		if ctx.Err() != nil {
+			break
+		}
+
 		childInfo, err := de.Info()
 		if err != nil {
 			continue
@@ -100,15 +121,19 @@ func scan(path string, info os.FileInfo, opts Options, depth int, sem chan struc
 			go func(i int, path string, info os.FileInfo) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				child, _ := scan(path, info, opts, depth+1, sem)
+				child, _ := scan(ctx, path, info, opts, depth+1, sem)
 				children[i] = child
 			}(i, childPath, childInfo)
 		default:
-			child, _ := scan(childPath, childInfo, opts, depth+1, sem)
+			child, _ := scan(ctx, childPath, childInfo, opts, depth+1, sem)
 			children[i] = child
 		}
 	}
 	wg.Wait()
+
+	if err := ctx.Err(); err != nil {
+		return e, err
+	}
 
 	for _, child := range children {
 		if child == nil {
